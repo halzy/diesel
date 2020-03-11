@@ -14,22 +14,7 @@
 )]
 #![cfg_attr(test, allow(clippy::result_unwrap_used))]
 
-extern crate chrono;
-extern crate clap;
-extern crate diesel;
-extern crate dotenv;
-extern crate heck;
-extern crate migrations_internals;
-extern crate serde;
-extern crate tempfile;
-extern crate toml;
-#[cfg(feature = "url")]
-extern crate url;
-
 mod config;
-
-#[cfg(feature = "barrel-migrations")]
-extern crate barrel;
 
 mod database_error;
 #[macro_use]
@@ -52,11 +37,11 @@ use std::{env, fs};
 
 use self::config::Config;
 use self::database_error::{DatabaseError, DatabaseResult};
-use migrations::MigrationError;
+use crate::migrations::MigrationError;
 use migrations_internals::TIMESTAMP_FORMAT;
 
 fn main() {
-    use self::dotenv::dotenv;
+    use dotenv::dotenv;
     dotenv().ok();
 
     let matches = cli::build_cli().get_matches();
@@ -213,8 +198,7 @@ fn migrations_dir(matches: &ArgMatches) -> Result<PathBuf, MigrationError> {
                 Config::read(matches)
                     .unwrap_or_else(handle_error)
                     .migrations_directory?
-                    .dir
-                    .to_owned(),
+                    .dir,
             )
         });
 
@@ -245,7 +229,7 @@ fn create_migrations_dir(matches: &ArgMatches) -> DatabaseResult<PathBuf> {
         create_migrations_directory(&dir)?;
     }
 
-    Ok(dir.to_owned())
+    Ok(dir)
 }
 
 fn create_config_file(matches: &ArgMatches) -> DatabaseResult<()> {
@@ -262,11 +246,11 @@ fn create_config_file(matches: &ArgMatches) -> DatabaseResult<()> {
 fn run_database_command(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         ("setup", Some(args)) => {
-            let migrations_dir = migrations_dir(args).unwrap_or_else(handle_error);
+            let migrations_dir = migrations_dir(matches).unwrap_or_else(handle_error);
             database::setup_database(args, &migrations_dir)?;
         }
         ("reset", Some(args)) => {
-            let migrations_dir = migrations_dir(args).unwrap_or_else(handle_error);
+            let migrations_dir = migrations_dir(matches).unwrap_or_else(handle_error);
             database::reset_database(args, &migrations_dir)?;
             regenerate_schema_if_file_specified(matches)?;
         }
@@ -293,7 +277,7 @@ fn generate_completions_command(matches: &ArgMatches) {
 /// Looks for a migrations directory in the current path and all parent paths,
 /// and creates one in the same directory as the Cargo.toml if it can't find
 /// one. It also sticks a .gitkeep in the directory so git will pick it up.
-/// Returns a `DatabaseError::CargoTomlNotFound` if no Cargo.toml is found.
+/// Returns a `DatabaseError::ProjectRootNotFound` if no Cargo.toml is found.
 fn create_migrations_directory(path: &Path) -> DatabaseResult<PathBuf> {
     println!("Creating migrations directory at: {}", path.display());
     fs::create_dir(path)?;
@@ -302,19 +286,22 @@ fn create_migrations_directory(path: &Path) -> DatabaseResult<PathBuf> {
 }
 
 fn find_project_root() -> DatabaseResult<PathBuf> {
-    search_for_cargo_toml_directory(&env::current_dir()?)
+    let current_dir = env::current_dir()?;
+    search_for_directory_containing_file(&current_dir, "diesel.toml")
+        .or_else(|_| search_for_directory_containing_file(&current_dir, "Cargo.toml"))
 }
 
 /// Searches for the directory that holds the project's Cargo.toml, and returns
-/// the path if it found it, or returns a `DatabaseError::CargoTomlNotFound`.
-fn search_for_cargo_toml_directory(path: &Path) -> DatabaseResult<PathBuf> {
-    let toml_path = path.join("Cargo.toml");
+/// the path if it found it, or returns a `DatabaseError::ProjectRootNotFound`.
+fn search_for_directory_containing_file(path: &Path, file: &str) -> DatabaseResult<PathBuf> {
+    let toml_path = path.join(file);
     if toml_path.is_file() {
         Ok(path.to_owned())
     } else {
         path.parent()
-            .map(search_for_cargo_toml_directory)
-            .unwrap_or(Err(DatabaseError::CargoTomlNotFound))
+            .map(|p| search_for_directory_containing_file(p, file))
+            .unwrap_or_else(|| Err(DatabaseError::ProjectRootNotFound(path.into())))
+            .map_err(|_| DatabaseError::ProjectRootNotFound(path.into()))
     }
 }
 
@@ -375,8 +362,8 @@ fn convert_absolute_path_to_relative(target_path: &Path, mut current_path: &Path
 }
 
 fn run_infer_schema(matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    use infer_schema_internals::TableName;
-    use print_schema::*;
+    use crate::infer_schema_internals::TableName;
+    use crate::print_schema::*;
 
     let database_url = database::database_url(matches);
     let mut config = Config::read(matches)?.print_schema;
@@ -467,7 +454,7 @@ fn regenerate_schema_if_file_specified(matches: &ArgMatches) -> Result<(), Box<d
 mod tests {
     extern crate tempfile;
 
-    use database_error::DatabaseError;
+    use crate::database_error::DatabaseError;
 
     use self::tempfile::Builder;
 
@@ -475,7 +462,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::convert_absolute_path_to_relative;
-    use super::search_for_cargo_toml_directory;
+    use super::search_for_directory_containing_file;
 
     #[test]
     fn toml_directory_find_cargo_toml() {
@@ -487,7 +474,7 @@ mod tests {
 
         assert_eq!(
             Ok(temp_path.clone()),
-            search_for_cargo_toml_directory(&temp_path)
+            search_for_directory_containing_file(&temp_path, "Cargo.toml")
         );
     }
 
@@ -497,8 +484,8 @@ mod tests {
         let temp_path = dir.path().canonicalize().unwrap();
 
         assert_eq!(
-            Err(DatabaseError::CargoTomlNotFound),
-            search_for_cargo_toml_directory(&temp_path)
+            Err(DatabaseError::ProjectRootNotFound(temp_path.clone())),
+            search_for_directory_containing_file(&temp_path, "Cargo.toml")
         );
     }
 

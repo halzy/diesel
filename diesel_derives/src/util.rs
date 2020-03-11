@@ -2,18 +2,22 @@ pub use diagnostic_shim::{Diagnostic, DiagnosticShim, EmitErrorExt};
 
 use meta::MetaItem;
 use proc_macro2::{Span, TokenStream};
-use syn::{Data, DeriveInput, GenericArgument, Ident, Type};
+use syn::{Data, DeriveInput, GenericArgument, Type};
 
-pub fn wrap_in_dummy_mod(const_name: Ident, item: TokenStream) -> TokenStream {
+pub fn wrap_in_dummy_mod(item: TokenStream) -> TokenStream {
     quote! {
-        #[allow(non_snake_case, unused_extern_crates, unused_imports)]
-        fn #const_name() {
-            // https://github.com/rust-lang/rust/issues/47314
-            extern crate std;
+        #[allow(unused_imports)]
+        const _: () = {
+            // This import is not actually redundant. When using diesel_derives
+            // inside of diesel, `diesel` doesn't exist as an extern crate, and
+            // to work around that it contains a private
+            // `mod diesel { pub use super::*; }` that this import will then
+            // refer to. In all other cases, this imports refers to the extern
+            // crate diesel.
             use diesel;
 
             #item
-        }
+        };
     }
 }
 
@@ -48,7 +52,7 @@ fn option_ty_arg(ty: &Type) -> Option<&Type> {
 pub fn ty_for_foreign_derive(item: &DeriveInput, flags: &MetaItem) -> Result<Type, Diagnostic> {
     if flags.has_flag("foreign_derive") {
         match item.data {
-            Data::Struct(ref body) => match body.fields.iter().nth(0) {
+            Data::Struct(ref body) => match body.fields.iter().next() {
                 Some(field) => Ok(field.ty.clone()),
                 None => Err(flags
                     .span()

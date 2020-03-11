@@ -30,6 +30,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
 ### Removed
 
 * All previously deprecated items have been removed.
+* Support for uuid version < 0.7.0 has been removed
 
 ### Changed
 
@@ -47,7 +48,7 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
   `Mysql::TypeMetadata`, you will need to take the new struct
   `MysqlTypeMetadata` instead.
 
-* The minimal officially supported rustc version is now 1.36.0
+* The minimal officially supported rustc version is now 1.37.0
 
 * The `RawValue` types for the `Mysql` and `Postgresql` backend where changed
   from `[u8]` to distinct opaque types. If you used the concrete `RawValue` type
@@ -55,11 +56,29 @@ for Rust libraries in [RFC #1105](https://github.com/rust-lang/rfcs/blob/master/
   For the postgres backend additionally type information where added to the `RawValue`
   type. This allows to dynamically deserialize `RawValues` in container types.
 
+* The uuidv07 feature was renamed to uuid, due to the removal of support for older uuid versions
+
+* Boxed queries (constructed from `.into_boxed()`) are now `Send`.
+
 ### Fixed
 
 * Many types were incorrectly considered non-aggregate when they should not
   have been. All types in Diesel are now correctly only considered
   non-aggregate if their parts are.
+
+* Nullability requirements are now properly enforced for nested joins.
+  Previously, only the rules for the outer-most join were considered. For
+  example, `users.left_join(posts).left_join(comments)` would allow selecting
+  any columns from `posts`. That will now fail to compile, and any selections
+  from `posts` will need to be made explicitly nullable.
+
+* Diesel CLI will now look for `diesel.toml` to determine the project root
+  before looking for `Cargo.toml`.
+
+* Any relative paths in `diesel.toml` will now be treated as relative to the
+  project root (the directory containing either `diesel.toml` or `Cargo.toml`).
+  They are no longer dependent on the current working directory (for all
+  directories in the same project)
 
 ### Deprecated
 

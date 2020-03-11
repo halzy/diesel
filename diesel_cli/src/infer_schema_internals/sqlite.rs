@@ -85,7 +85,7 @@ pub fn load_foreign_key_constraints(
                 .collect())
         })
         .collect::<QueryResult<Vec<Vec<_>>>>()?;
-    Ok(rows.into_iter().flat_map(|x| x).collect())
+    Ok(rows.into_iter().flatten().collect())
 }
 
 pub fn get_table_data(
@@ -247,7 +247,7 @@ fn load_table_names_returns_error_when_given_schema_name() {
     let table_names = load_table_names(&conn, Some("stuff"));
     match table_names {
         Ok(_) => panic!("Expected load_table_names to return an error"),
-        Err(e) => assert!(e.description().starts_with(
+        Err(e) => assert!(e.to_string().starts_with(
             "sqlite cannot infer \
              schema for databases"
         )),
